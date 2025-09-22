@@ -1,0 +1,189 @@
+# -- LocalScript (place in StarterPlayer > StarterPlayerScripts)
+-- GUI + logic to hide other players' appearances (client-side only)
+-- Made by: @leande8000
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local LocalPlayer = Players.LocalPlayer
+
+-- Settings
+local START_ENABLED = false
+local MODES = {"Accessories Only", "Full Invisible"}
+local DEFAULT_MODE_INDEX = 1
+
+-- Data backup
+local backups = {}
+
+local function waitForHumanoid(character)
+	if not character then return end
+	local hum = character:FindFirstChildOfClass("Humanoid")
+	local timeout = 5
+	local t = 0
+	while not hum and t < timeout do
+		hum = character:FindFirstChildOfClass("Humanoid")
+		t = t + 0.1
+		wait(0.1)
+	end
+	return hum
+end
+
+local function removeAccessoriesAndClothing(character, playerId)
+	backups[playerId] = backups[playerId] or { accessories = {}, clothing = {}, partTransparency = {} }
+	local b = backups[playerId]
+	for _, child in ipairs(character:GetChildren()) do
+		if child:IsA("Accessory") then
+			table.insert(b.accessories, child:Clone())
+			child:Destroy()
+		elseif child:IsA("Shirt") or child:IsA("Pants") then
+			table.insert(b.clothing, child:Clone())
+			child:Destroy()
+		end
+	end
+end
+
+local function makePartsInvisible(character, playerId)
+	backups[playerId] = backups[playerId] or { accessories = {}, clothing = {}, partTransparency = {} }
+	local b = backups[playerId]
+	for _, part in ipairs(character:GetDescendants()) do
+		if part:IsA("BasePart") and part.Name ~= "HumanoidRootPart" then
+			if not b.partTransparency[part:GetFullName()] then
+				b.partTransparency[part:GetFullName()] = part.Transparency
+			end
+			part.Transparency = 1
+		end
+	end
+end
+
+local function restoreAccessoriesAndClothing(character, playerId)
+	local b = backups[playerId]
+	if not b then return end
+	for _, c in ipairs(b.clothing) do
+		local clone = c:Clone()
+		clone.Parent = character
+	end
+	b.clothing = {}
+	for _, a in ipairs(b.accessories) do
+		local clone = a:Clone()
+		clone.Parent = character
+	end
+	b.accessories = {}
+end
+
+local function restorePartsTransparency(character, playerId)
+	local b = backups[playerId]
+	if not b or not b.partTransparency then return end
+	for _, part in ipairs(character:GetDescendants()) do
+		if part:IsA("BasePart") and part.Name ~= "HumanoidRootPart" then
+			local key = part:GetFullName()
+			local prev = b.partTransparency[key]
+			if prev then
+				part.Transparency = prev
+				b.partTransparency[key] = nil
+			else
+				part.Transparency = 0
+			end
+		end
+	end
+end
+
+local function applyModeToCharacter(character, enabled, mode)
+	if not character then return end
+	local player = Players:GetPlayerFromCharacter(character)
+	if not player or player == LocalPlayer then return end
+	local pid = player.UserId
+	if enabled then
+		if mode == "Accessories Only" then
+			removeAccessoriesAndClothing(character, pid)
+		elseif mode == "Full Invisible" then
+			removeAccessoriesAndClothing(character, pid)
+			makePartsInvisible(character, pid)
+		end
+	else
+		restoreAccessoriesAndClothing(character, pid)
+		restorePartsTransparency(character, pid)
+		backups[pid] = nil
+	end
+end
+
+local function applyToAll(enabled, mode)
+	for _, player in ipairs(Players:GetPlayers()) do
+		if player ~= LocalPlayer and player.Character then
+			applyModeToCharacter(player.Character, enabled, mode)
+		end
+	end
+end
+
+local function onCharacterAdded(character, player, enabled, mode)
+	waitForHumanoid(character)
+	applyModeToCharacter(character, enabled, mode)
+end
+
+local function onPlayerAdded(player, enabled, mode, connections)
+	if player == LocalPlayer then return end
+	connections[player.UserId] = {}
+	connections[player.UserId].charConn = player.CharacterAdded:Connect(function(char)
+		onCharacterAdded(char, player, enabled, mode)
+	end)
+	if player.Character then
+		onCharacterAdded(player.Character, player, enabled, mode)
+	end
+end
+
+-- GUI creation
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "PerformanceSkinGUI"
+screenGui.ResetOnSpawn = false
+screenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
+
+local mainFrame = Instance.new("Frame")
+mainFrame.Name = "Main"
+mainFrame.Size = UDim2.new(0, 280, 0, 140)
+mainFrame.Position = UDim2.new(0.02, 0, 0.15, 0)
+mainFrame.BackgroundTransparency = 0.3
+mainFrame.BackgroundColor3 = Color3.fromRGB(0, 255, 0) -- verde transparente
+mainFrame.BorderSizePixel = 0
+mainFrame.Parent = screenGui
+
+local uiCorner = Instance.new("UICorner", mainFrame)
+uiCorner.CornerRadius = UDim.new(0, 12)
+
+-- RGB Stroke border
+local uiStroke = Instance.new("UIStroke", mainFrame)
+uiStroke.Thickness = 3
+uiStroke.Color = Color3.fromRGB(255,0,0)
+
+local hue = 0
+RunService.RenderStepped:Connect(function(deltaTime)
+	hue = hue + deltaTime * 0.1
+	if hue > 0.3 then hue = 0 end  -- rojo-amarillo-rosa sin verde
+	uiStroke.Color = Color3.fromHSV(hue, 1, 1)
+end)
+
+-- Title
+local title = Instance.new("TextLabel")
+title.Name = "Title"
+title.Size = UDim2.new(1, -16, 0, 34)
+title.Position = UDim2.new(0, 8, 0, 8)
+title.BackgroundTransparency = 1
+title.Text = "Performance Skins"
+title.Font = Enum.Font.GothamBold
+title.TextSize = 20
+title.TextColor3 = Color3.fromRGB(255,255,255)
+title.TextStrokeColor3 = Color3.fromRGB(255,0,0)
+title.TextStrokeTransparency = 0
+title.TextXAlignment = Enum.TextXAlignment.Left
+title.Parent = mainFrame
+
+local credit = Instance.new("TextLabel")
+credit.Name = "Credit"
+credit.Size = UDim2.new(1, -16, 0, 18)
+credit.Position = UDim2.new(0, 8, 0, 40)
+credit.BackgroundTransparency = 1
+credit.Text = "Made by: @leande8000"
+credit.Font = Enum.Font.Gotham
+credit.TextSize = 14
+credit.TextColor3 = Color3.fromRGB(255,255,255)
+credit.TextStrokeColor3 = Color3.fromRGB(255,0,0)
+credit.TextStrokeTransparency = 0
+credit.TextXAlignment = Enum.TextXAlignment.Left
+credit.Parent = mainFrame
